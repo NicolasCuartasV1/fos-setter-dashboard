@@ -8,6 +8,22 @@ import type { Lead, Session, Booking, Blocker } from "@/lib/supabase";
 
 export const revalidate = 300; // refresh every 5 minutes
 
+type RevenueData = {
+  os_light: {
+    total_all_time: number;
+    revenue_all_time: number;
+    total_this_week: number;
+    revenue_this_week: number;
+    total_this_month: number;
+    revenue_this_month: number;
+    recent: Array<{ name: string; date: string }>;
+  };
+  sales_pipeline: {
+    closed_won_total: number;
+    closed_won_revenue: number;
+  };
+};
+
 const STAGE_LABELS: Record<number, string> = {
   1: "New",
   2: "Opener Sent",
@@ -162,19 +178,42 @@ function BlockerCard({ blocker }: { blocker: Blocker }) {
   );
 }
 
+async function getRevenue(): Promise<RevenueData | null> {
+  try {
+    const resp = await fetch(
+      `${process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"}/api/revenue`,
+      { next: { revalidate: 3600 } }
+    );
+    if (!resp.ok) return null;
+    return resp.json();
+  } catch {
+    return null;
+  }
+}
+
+function formatRevenue(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
+  return `$${n.toLocaleString()}`;
+}
+
 export default async function Dashboard() {
   let leads: Lead[] = [];
   let sessions: Session[] = [];
   let bookings: Booking[] = [];
   let blockers: Blocker[] = [];
   let dbError = false;
+  let revenue: RevenueData | null = null;
 
   try {
-    [leads, sessions, bookings, blockers] = await Promise.all([
-      getActiveLeads(),
-      getRecentSessions(30),
-      getRecentBookings(20),
-      getOpenBlockers(),
+    [[leads, sessions, bookings, blockers], revenue] = await Promise.all([
+      Promise.all([
+        getActiveLeads(),
+        getRecentSessions(30),
+        getRecentBookings(20),
+        getOpenBlockers(),
+      ]),
+      getRevenue(),
     ]);
   } catch {
     dbError = true;
@@ -361,6 +400,50 @@ export default async function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Revenue Section */}
+      {revenue && (
+        <div style={{ background: "#1A1A1A", border: "1px solid #2A2A2A", borderRadius: 12, padding: "1.5rem", marginBottom: "2.5rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
+            <span style={{ width: 6, height: 6, background: "#D9FC67", borderRadius: "50%", display: "inline-block" }} />
+            <h3 style={{ color: "#F5F5F5", fontWeight: 600, fontSize: 14, margin: 0 }}>Revenue Tracker</h3>
+          </div>
+
+          {/* OS Light */}
+          <p style={{ color: "#555", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12 }}>Founder OS Light ($197)</p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
+            <KPICard label="All time purchases" value={revenue.os_light.total_all_time.toLocaleString()} />
+            <KPICard label="All time revenue" value={formatRevenue(revenue.os_light.revenue_all_time)} highlight />
+            <KPICard label="This month" value={`${revenue.os_light.total_this_month} purchases`} sub={formatRevenue(revenue.os_light.revenue_this_month)} />
+            <KPICard label="This week" value={`${revenue.os_light.total_this_week} purchases`} sub={formatRevenue(revenue.os_light.revenue_this_week)} />
+          </div>
+
+          {/* Recent OS Light buyers */}
+          {revenue.os_light.recent.length > 0 && (
+            <div>
+              <p style={{ color: "#555", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>Recent buyers this week</p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {revenue.os_light.recent.map((r, i) => (
+                  <span key={i} style={{ background: "#D9FC6711", border: "1px solid #D9FC6733", borderRadius: 6, padding: "3px 10px", fontSize: 12, color: "#D9FC67" }}>
+                    {r.name} <span style={{ color: "#555" }}>{r.date}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Sales Pipeline */}
+          {revenue.sales_pipeline.closed_won_total > 0 && (
+            <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid #2A2A2A" }}>
+              <p style={{ color: "#555", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12 }}>Sales Pipeline 2026 — Closed Won</p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16 }}>
+                <KPICard label="Deals closed" value={revenue.sales_pipeline.closed_won_total} />
+                <KPICard label="Revenue" value={formatRevenue(revenue.sales_pipeline.closed_won_revenue)} highlight />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <p style={{ color: "#333", fontSize: 11, textAlign: "center", marginTop: "3rem" }}>
         Alberto v1 / FOS DM Setter / Matt Gray Instagram
