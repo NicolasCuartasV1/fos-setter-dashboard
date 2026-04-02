@@ -1,65 +1,370 @@
-import Image from "next/image";
+import {
+  getActiveLeads,
+  getRecentSessions,
+  getRecentBookings,
+  getOpenBlockers,
+} from "@/lib/supabase";
+import type { Lead, Session, Booking, Blocker } from "@/lib/supabase";
 
-export default function Home() {
+export const revalidate = 300; // refresh every 5 minutes
+
+const STAGE_LABELS: Record<number, string> = {
+  1: "New",
+  2: "Opener Sent",
+  3: "Engaged",
+  4: "Qualifying",
+  5: "Calendly Sent",
+  6: "Booked",
+  7: "Pre-Call Sent",
+  8: "No-Show",
+  9: "Closed",
+  10: "Not Qualified",
+};
+
+const STAGE_COLORS: Record<number, string> = {
+  1: "#555",
+  2: "#666",
+  3: "#4A90D9",
+  4: "#7B68EE",
+  5: "#E8A838",
+  6: "#D9FC67",
+  7: "#D9FC67",
+  8: "#E05252",
+  9: "#52C87A",
+  10: "#888",
+};
+
+function stageCounts(leads: Lead[]): Record<number, number> {
+  const counts: Record<number, number> = {};
+  for (const lead of leads) {
+    counts[lead.stage] = (counts[lead.stage] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function weeklyStats(sessions: Session[]) {
+  const now = new Date();
+  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const thisWeek = sessions.filter((s) => new Date(s.session_date) >= weekAgo);
+  return {
+    sessions: thisWeek.length,
+    dms: thisWeek.reduce((a, s) => a + (s.replies_handled ?? 0) + (s.new_conversations ?? 0), 0),
+    sets: thisWeek.reduce((a, s) => a + (s.calendly_links_sent ?? 0), 0),
+    booked: thisWeek.reduce((a, s) => a + (s.bookings_confirmed ?? 0), 0),
+  };
+}
+
+function monthlyStats(sessions: Session[]) {
+  const now = new Date();
+  const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const thisMonth = sessions.filter((s) => new Date(s.session_date) >= monthAgo);
+  return {
+    sessions: thisMonth.length,
+    dms: thisMonth.reduce((a, s) => a + (s.replies_handled ?? 0) + (s.new_conversations ?? 0), 0),
+    sets: thisMonth.reduce((a, s) => a + (s.calendly_links_sent ?? 0), 0),
+    booked: thisMonth.reduce((a, s) => a + (s.bookings_confirmed ?? 0), 0),
+  };
+}
+
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatDateTime(iso: string) {
+  return new Date(iso).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function KPICard({
+  label,
+  value,
+  sub,
+  highlight,
+}: {
+  label: string;
+  value: string | number;
+  sub?: string;
+  highlight?: boolean;
+}) {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div style={{ background: "#1A1A1A", border: highlight ? "1px solid #D9FC67" : "1px solid #2A2A2A", borderRadius: 12, padding: "1.5rem" }}>
+      <p style={{ color: "#888", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>{label}</p>
+      <p style={{ color: highlight ? "#D9FC67" : "#F5F5F5", fontSize: 32, fontWeight: 700, lineHeight: 1 }}>{value}</p>
+      {sub && <p style={{ color: "#666", fontSize: 12, marginTop: 6 }}>{sub}</p>}
+    </div>
+  );
+}
+
+function StageBadge({ stage }: { stage: number }) {
+  return (
+    <span style={{ background: (STAGE_COLORS[stage] ?? "#555") + "22", color: STAGE_COLORS[stage] ?? "#888", border: `1px solid ${STAGE_COLORS[stage] ?? "#555"}44`, borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 500, whiteSpace: "nowrap" }}>
+      {STAGE_LABELS[stage] ?? `Stage ${stage}`}
+    </span>
+  );
+}
+
+function PipelineFunnel({ counts }: { counts: Record<number, number> }) {
+  const stages = [3, 4, 5, 6, 8];
+  const maxCount = Math.max(...stages.map((s) => counts[s] ?? 0), 1);
+  return (
+    <div style={{ background: "#1A1A1A", border: "1px solid #2A2A2A", borderRadius: 12, padding: "1.5rem" }}>
+      <h3 style={{ color: "#F5F5F5", fontWeight: 600, fontSize: 14, marginBottom: 20 }}>Active Pipeline</h3>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {stages.map((stage) => {
+          const count = counts[stage] ?? 0;
+          const pct = Math.round((count / maxCount) * 100);
+          return (
+            <div key={stage}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <span style={{ color: "#888", fontSize: 12 }}>{STAGE_LABELS[stage]}</span>
+                <span style={{ color: STAGE_COLORS[stage] ?? "#888", fontSize: 12, fontWeight: 600 }}>{count}</span>
+              </div>
+              <div style={{ background: "#0A0A0A", borderRadius: 4, height: 6, overflow: "hidden" }}>
+                <div style={{ background: STAGE_COLORS[stage] ?? "#555", width: `${pct}%`, height: "100%", borderRadius: 4 }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function BlockerCard({ blocker }: { blocker: Blocker }) {
+  const typeColors: Record<string, string> = {
+    missing_link: "#E8A838",
+    escalation: "#E05252",
+    arber_handoff: "#7B68EE",
+    other: "#888",
+  };
+  const color = typeColors[blocker.blocker_type ?? "other"] ?? "#888";
+  return (
+    <div style={{ background: "#0A0A0A", border: `1px solid ${color}33`, borderLeft: `3px solid ${color}`, borderRadius: 8, padding: "1rem" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+        <span style={{ color, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          {blocker.blocker_type?.replace("_", " ") ?? "other"}
+        </span>
+        <span style={{ color: "#555", fontSize: 11 }}>{formatDate(blocker.created_at)}</span>
+      </div>
+      <p style={{ color: "#F5F5F5", fontSize: 13, marginBottom: blocker.lead_name ? 6 : 0 }}>{blocker.description}</p>
+      {blocker.lead_name && (
+        <p style={{ color: "#666", fontSize: 12 }}>Lead: {blocker.lead_name}{blocker.lead_handle ? ` (@${blocker.lead_handle})` : ""}</p>
+      )}
+    </div>
+  );
+}
+
+export default async function Dashboard() {
+  let leads: Lead[] = [];
+  let sessions: Session[] = [];
+  let bookings: Booking[] = [];
+  let blockers: Blocker[] = [];
+  let dbError = false;
+
+  try {
+    [leads, sessions, bookings, blockers] = await Promise.all([
+      getActiveLeads(),
+      getRecentSessions(30),
+      getRecentBookings(20),
+      getOpenBlockers(),
+    ]);
+  } catch {
+    dbError = true;
+  }
+
+  const counts = stageCounts(leads);
+  const weekly = weeklyStats(sessions);
+  const monthly = monthlyStats(sessions);
+  const confirmedBookings = bookings.filter((b) => b.status === "booked" || b.status === "completed");
+
+  return (
+    <div style={{ maxWidth: 1200, margin: "0 auto", padding: "2rem 1.5rem" }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2.5rem" }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+            <span style={{ width: 8, height: 8, background: "#D9FC67", borderRadius: "50%", display: "inline-block" }} />
+            <span style={{ color: "#888", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.1em" }}>Founder OS / Instagram DMs</span>
+          </div>
+          <h1 style={{ color: "#F5F5F5", fontSize: 28, fontWeight: 700, margin: 0 }}>Alberto</h1>
+          <p style={{ color: "#666", fontSize: 13, marginTop: 4 }}>DM Setter Dashboard / Matt Gray account</p>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <p style={{ color: "#555", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em" }}>Operator</p>
+          <p style={{ color: "#F5F5F5", fontSize: 14, fontWeight: 600 }}>Nicolas</p>
+        </div>
+      </div>
+
+      {dbError && (
+        <div style={{ background: "#E0525222", border: "1px solid #E0525244", borderRadius: 8, padding: "1rem", marginBottom: "2rem" }}>
+          <p style={{ color: "#E05252", fontSize: 13 }}>
+            Database not connected. Run <code>migrations/001_create_dm_tables.sql</code> in the Supabase SQL editor at{" "}
+            <a href="https://supabase.com/dashboard/project/yhvssclmrddiowlccvjc/sql" style={{ color: "#D9FC67" }}>
+              supabase.com/dashboard/project/yhvssclmrddiowlccvjc/sql
+            </a>
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      )}
+
+      {/* Weekly KPIs */}
+      <p style={{ color: "#555", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12 }}>This Week</p>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: "1.5rem" }}>
+        <KPICard label="Sessions run" value={weekly.sessions} />
+        <KPICard label="DMs sent / replied" value={weekly.dms} />
+        <KPICard label="Links sent" value={weekly.sets} sub="Calendly links" />
+        <KPICard label="Calls booked" value={weekly.booked} highlight={weekly.booked > 0} />
+      </div>
+
+      {/* Monthly KPIs */}
+      <p style={{ color: "#555", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12 }}>This Month</p>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: "2.5rem" }}>
+        <KPICard label="Sessions run" value={monthly.sessions} />
+        <KPICard label="DMs sent / replied" value={monthly.dms} />
+        <KPICard label="Links sent" value={monthly.sets} />
+        <KPICard label="Calls booked" value={monthly.booked} highlight={monthly.booked > 0} />
+      </div>
+
+      {/* Pipeline + Blockers */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: "2.5rem" }}>
+        <PipelineFunnel counts={counts} />
+        <div style={{ background: "#1A1A1A", border: "1px solid #2A2A2A", borderRadius: 12, padding: "1.5rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <h3 style={{ color: "#F5F5F5", fontWeight: 600, fontSize: 14, margin: 0 }}>What Alberto Needs from Nicolas</h3>
+            {blockers.length > 0 && (
+              <span style={{ background: "#E8A83822", color: "#E8A838", border: "1px solid #E8A83844", borderRadius: 20, padding: "2px 10px", fontSize: 12, fontWeight: 600 }}>
+                {blockers.length} open
+              </span>
+            )}
+          </div>
+          {blockers.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "2rem 0" }}>
+              <span style={{ display: "inline-block", width: 8, height: 8, background: "#D9FC67", borderRadius: "50%", marginBottom: 8 }} />
+              <p style={{ color: "#555", fontSize: 13 }}>All clear. No open blockers.</p>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {blockers.map((b) => <BlockerCard key={b.id} blocker={b} />)}
+            </div>
+          )}
         </div>
-      </main>
+      </div>
+
+      {/* Active Leads */}
+      <div style={{ background: "#1A1A1A", border: "1px solid #2A2A2A", borderRadius: 12, padding: "1.5rem", marginBottom: "2.5rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h3 style={{ color: "#F5F5F5", fontWeight: 600, fontSize: 14, margin: 0 }}>Active Leads</h3>
+          <span style={{ color: "#888", fontSize: 12 }}>{leads.length} total</span>
+        </div>
+        {leads.length === 0 ? (
+          <p style={{ color: "#555", fontSize: 13, textAlign: "center", padding: "2rem 0" }}>No active leads yet.</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid #2A2A2A" }}>
+                  {["Name", "Handle", "Stage", "Bottleneck", "Last Contact"].map((h) => (
+                    <th key={h} style={{ padding: "8px 12px", color: "#555", fontSize: 11, textAlign: "left", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 500 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {leads.map((lead) => (
+                  <tr key={lead.id} style={{ borderBottom: "1px solid #1E1E1E" }}>
+                    <td style={{ padding: "10px 12px", color: "#F5F5F5", fontSize: 13 }}>{lead.name}</td>
+                    <td style={{ padding: "10px 12px", color: "#888", fontSize: 12 }}>@{lead.handle ?? "—"}</td>
+                    <td style={{ padding: "10px 12px" }}><StageBadge stage={lead.stage} /></td>
+                    <td style={{ padding: "10px 12px", color: "#666", fontSize: 12, maxWidth: 200 }}>{lead.bottleneck ?? lead.what_they_said ?? "—"}</td>
+                    <td style={{ padding: "10px 12px", color: "#666", fontSize: 12 }}>{lead.last_contact ? formatDate(lead.last_contact) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Bookings */}
+      <div style={{ background: "#1A1A1A", border: "1px solid #2A2A2A", borderRadius: 12, padding: "1.5rem", marginBottom: "2.5rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h3 style={{ color: "#F5F5F5", fontWeight: 600, fontSize: 14, margin: 0 }}>Bookings Set by Alberto</h3>
+          <span style={{ color: "#D9FC67", fontSize: 12, fontWeight: 600 }}>{confirmedBookings.length} confirmed</span>
+        </div>
+        {bookings.length === 0 ? (
+          <p style={{ color: "#555", fontSize: 13, textAlign: "center", padding: "2rem 0" }}>No bookings yet.</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid #2A2A2A" }}>
+                  {["Lead", "Handle", "Call Time", "Status", "Outcome"].map((h) => (
+                    <th key={h} style={{ padding: "8px 12px", color: "#555", fontSize: 11, textAlign: "left", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 500 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {bookings.map((b) => {
+                  const statusColor = b.status === "booked" ? "#D9FC67" : b.status === "completed" ? "#52C87A" : b.status === "no_show" ? "#E05252" : "#888";
+                  return (
+                    <tr key={b.id} style={{ borderBottom: "1px solid #1E1E1E" }}>
+                      <td style={{ padding: "10px 12px", color: "#F5F5F5", fontSize: 13 }}>{b.lead_name ?? "—"}</td>
+                      <td style={{ padding: "10px 12px", color: "#888", fontSize: 12 }}>@{b.lead_handle ?? "—"}</td>
+                      <td style={{ padding: "10px 12px", color: "#888", fontSize: 12 }}>{b.event_start ? formatDateTime(b.event_start) : "—"}</td>
+                      <td style={{ padding: "10px 12px" }}>
+                        <span style={{ color: statusColor, fontSize: 12, fontWeight: 500, textTransform: "capitalize" }}>{b.status.replace("_", " ")}</span>
+                      </td>
+                      <td style={{ padding: "10px 12px", color: "#666", fontSize: 12 }}>{b.outcome ?? "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Session Log */}
+      <div style={{ background: "#1A1A1A", border: "1px solid #2A2A2A", borderRadius: 12, padding: "1.5rem" }}>
+        <h3 style={{ color: "#F5F5F5", fontWeight: 600, fontSize: 14, marginBottom: 16 }}>Session History</h3>
+        {sessions.length === 0 ? (
+          <p style={{ color: "#555", fontSize: 13, textAlign: "center", padding: "2rem 0" }}>No sessions logged yet.</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid #2A2A2A" }}>
+                  {["Date", "Leads", "DMs", "Links Sent", "Booked", "Summary"].map((h) => (
+                    <th key={h} style={{ padding: "8px 12px", color: "#555", fontSize: 11, textAlign: ["Date", "Summary"].includes(h) ? "left" : "center", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 500 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sessions.map((s) => (
+                  <tr key={s.id} style={{ borderBottom: "1px solid #1E1E1E" }}>
+                    <td style={{ padding: "10px 12px", color: "#F5F5F5", fontSize: 13 }}>{formatDate(s.session_date)}</td>
+                    <td style={{ padding: "10px 12px", color: "#888", fontSize: 13, textAlign: "center" }}>{s.total_leads_worked}</td>
+                    <td style={{ padding: "10px 12px", color: "#888", fontSize: 13, textAlign: "center" }}>{(s.replies_handled ?? 0) + (s.new_conversations ?? 0)}</td>
+                    <td style={{ padding: "10px 12px", color: "#E8A838", fontSize: 13, textAlign: "center" }}>{s.calendly_links_sent}</td>
+                    <td style={{ padding: "10px 12px", color: "#D9FC67", fontSize: 13, textAlign: "center", fontWeight: s.bookings_confirmed > 0 ? 600 : 400 }}>{s.bookings_confirmed}</td>
+                    <td style={{ padding: "10px 12px", color: "#666", fontSize: 12, maxWidth: 240 }}>{s.summary ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <p style={{ color: "#333", fontSize: 11, textAlign: "center", marginTop: "3rem" }}>
+        Alberto v1 / FOS DM Setter / Matt Gray Instagram
+      </p>
     </div>
   );
 }
