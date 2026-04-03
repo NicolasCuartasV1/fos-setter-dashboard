@@ -246,8 +246,8 @@ export default async function Dashboard() {
         <div style={{ background: "#E0525222", border: "1px solid #E0525244", borderRadius: 8, padding: "1rem", marginBottom: "2rem" }}>
           <p style={{ color: "#E05252", fontSize: 13 }}>
             Database not connected. Run <code>migrations/001_create_dm_tables.sql</code> in the Supabase SQL editor at{" "}
-            <a href="https://supabase.com/dashboard/project/yhvssclmrddiowlccvjc/sql" style={{ color: "#D9FC67" }}>
-              supabase.com/dashboard/project/yhvssclmrddiowlccvjc/sql
+            <a href="https://supabase.com/dashboard/project/xzmntpwwccmpkgeprodj/sql" style={{ color: "#D9FC67" }}>
+              supabase.com/dashboard/project/xzmntpwwccmpkgeprodj/sql
             </a>
           </p>
         </div>
