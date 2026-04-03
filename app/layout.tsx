@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Alberto — FOS DM Setter Dashboard",
+  title: "DM Setter Dashboard — Matt Gray Instagram",
   description: "Live pipeline, KPIs, and session logs for Matt Gray / Founder OS Instagram DM setting",
 };
 

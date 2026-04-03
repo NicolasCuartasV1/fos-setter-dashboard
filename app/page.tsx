@@ -233,8 +233,8 @@ export default async function Dashboard() {
             <span style={{ width: 8, height: 8, background: "#D9FC67", borderRadius: "50%", display: "inline-block" }} />
             <span style={{ color: "#888", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.1em" }}>Founder OS / Instagram DMs</span>
           </div>
-          <h1 style={{ color: "#F5F5F5", fontSize: 28, fontWeight: 700, margin: 0 }}>Alberto</h1>
-          <p style={{ color: "#666", fontSize: 13, marginTop: 4 }}>DM Setter Dashboard / Matt Gray account</p>
+          <h1 style={{ color: "#F5F5F5", fontSize: 28, fontWeight: 700, margin: 0 }}>DM Setter Dashboard</h1>
+          <p style={{ color: "#666", fontSize: 13, marginTop: 4 }}>Matt Gray / Instagram DMs</p>
         </div>
         <div style={{ textAlign: "right" }}>
           <p style={{ color: "#555", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em" }}>Operator</p>
