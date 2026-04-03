@@ -4,8 +4,10 @@ import {
   getRecentSessions,
   getRecentBookings,
   getOpenBlockers,
+  getAlbertoStats,
+  getRecentConversationsWithLeads,
 } from "@/lib/supabase";
-import type { Lead, Session, Booking, Blocker } from "@/lib/supabase";
+import type { Lead, Session, Booking, Blocker, AlbertoStats, ConversationWithLead } from "@/lib/supabase";
 
 export const revalidate = 300; // refresh every 5 minutes
 
@@ -206,6 +208,75 @@ function BlockerCard({ blocker }: { blocker: Blocker }) {
   );
 }
 
+function AlbertoKPIs({ stats }: { stats: AlbertoStats }) {
+  const latencyLabel = stats.avgLatencyMs
+    ? stats.avgLatencyMs >= 1000
+      ? `${(stats.avgLatencyMs / 1000).toFixed(1)}s`
+      : `${stats.avgLatencyMs}ms`
+    : "—";
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: "2.5rem" }}>
+      <KPICard label="AI replies today" value={stats.repliesToday} highlight={stats.repliesToday > 0} />
+      <KPICard label="AI replies this week" value={stats.repliesThisWeek} />
+      <KPICard label="Avg response time" value={latencyLabel} sub="Claude API latency" />
+      <KPICard
+        label="Open escalations"
+        value={stats.escalationsOpen}
+        highlight={stats.escalationsOpen > 0}
+        sub={stats.escalationsOpen > 0 ? "Needs your review" : undefined}
+      />
+    </div>
+  );
+}
+
+function ActivityFeed({ conversations }: { conversations: ConversationWithLead[] }) {
+  if (conversations.length === 0) {
+    return (
+      <div style={{ textAlign: "center", padding: "2rem 0" }}>
+        <p style={{ color: "#555", fontSize: 13 }}>No conversations yet. Waiting for first DM.</p>
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {conversations.map((msg) => {
+        const isOut = msg.direction === "outbound";
+        const lead = msg.dm_leads;
+        const preview = msg.message_text.length > 120
+          ? msg.message_text.slice(0, 120) + "…"
+          : msg.message_text;
+        return (
+          <div key={msg.id} style={{ display: "flex", gap: 12, padding: "10px 12px", background: "#0A0A0A", borderRadius: 8, borderLeft: `3px solid ${isOut ? "#D9FC6766" : "#4A90D966"}` }}>
+            <div style={{ width: 20, flexShrink: 0, paddingTop: 1 }}>
+              <span style={{ fontSize: 12 }}>{isOut ? "→" : "←"}</span>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                <span style={{ color: "#F5F5F5", fontSize: 12, fontWeight: 600 }}>
+                  {lead?.name ?? "Unknown"}
+                </span>
+                {lead?.handle && (
+                  <span style={{ color: "#555", fontSize: 11 }}>@{lead.handle}</span>
+                )}
+                {isOut && msg.ai_generated && (
+                  <span style={{ background: "#D9FC6711", border: "1px solid #D9FC6733", color: "#D9FC67", fontSize: 10, padding: "1px 6px", borderRadius: 4 }}>
+                    Alberto
+                  </span>
+                )}
+                {lead?.stage && <StageBadge stage={lead.stage} />}
+              </div>
+              <p style={{ color: isOut ? "#AAA" : "#888", fontSize: 12, margin: 0, lineHeight: 1.4 }}>{preview}</p>
+            </div>
+            <div style={{ flexShrink: 0, color: "#444", fontSize: 11, paddingTop: 1, whiteSpace: "nowrap" }}>
+              {formatDateTime(msg.sent_at)}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 async function getRevenue(): Promise<RevenueData | null> {
   try {
     const resp = await fetch(
@@ -231,17 +302,21 @@ export default async function Dashboard() {
   let sessions: Session[] = [];
   let bookings: Booking[] = [];
   let blockers: Blocker[] = [];
+  let albertoStats: AlbertoStats = { repliesToday: 0, repliesThisWeek: 0, avgLatencyMs: null, escalationsOpen: 0 };
+  let recentConversations: ConversationWithLead[] = [];
   let dbError = false;
   let revenue: RevenueData | null = null;
 
   try {
-    [[leads, hotLeads, sessions, bookings, blockers], revenue] = await Promise.all([
+    [[leads, hotLeads, sessions, bookings, blockers, albertoStats, recentConversations], revenue] = await Promise.all([
       Promise.all([
         getActiveLeads(),
         getHotLeads(),
         getRecentSessions(30),
         getRecentBookings(20),
         getOpenBlockers(),
+        getAlbertoStats(),
+        getRecentConversationsWithLeads(30),
       ]),
       getRevenue(),
     ]);
@@ -282,6 +357,10 @@ export default async function Dashboard() {
           </p>
         </div>
       )}
+
+      {/* Alberto Live Stats */}
+      <p style={{ color: "#555", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12 }}>Alberto — 24/7 AI Setter</p>
+      <AlbertoKPIs stats={albertoStats} />
 
       {/* Weekly KPIs */}
       <p style={{ color: "#555", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12 }}>This Week</p>
@@ -354,6 +433,18 @@ export default async function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* Alberto Activity Feed */}
+      <div style={{ background: "#1A1A1A", border: "1px solid #2A2A2A", borderRadius: 12, padding: "1.5rem", marginBottom: "2.5rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ width: 8, height: 8, background: "#D9FC67", borderRadius: "50%", display: "inline-block", boxShadow: "0 0 6px #D9FC67" }} />
+            <h3 style={{ color: "#F5F5F5", fontWeight: 600, fontSize: 14, margin: 0 }}>Alberto Activity</h3>
+          </div>
+          <span style={{ color: "#555", fontSize: 12 }}>last 30 messages</span>
+        </div>
+        <ActivityFeed conversations={recentConversations} />
+      </div>
 
       {/* Active Leads */}
       <div style={{ background: "#1A1A1A", border: "1px solid #2A2A2A", borderRadius: 12, padding: "1.5rem", marginBottom: "2.5rem" }}>

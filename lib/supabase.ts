@@ -103,6 +103,30 @@ export type Resource = {
   active: boolean;
 };
 
+export type AIResponse = {
+  id: number;
+  created_at: string;
+  lead_id: number;
+  conversation_id: number | null;
+  model: string;
+  response_text: string | null;
+  approved: boolean | null;
+  latency_ms: number | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+};
+
+export type ConversationWithLead = Conversation & {
+  dm_leads: { name: string; handle: string | null; stage: number } | null;
+};
+
+export type AlbertoStats = {
+  repliesToday: number;
+  repliesThisWeek: number;
+  avgLatencyMs: number | null;
+  escalationsOpen: number;
+};
+
 // ── Queries ──────────────────────────────────────────────────────────────────
 
 export async function getActiveLeads(): Promise<Lead[]> {
@@ -174,4 +198,61 @@ export async function getResources(): Promise<Resource[]> {
     .order("name");
   if (error) throw error;
   return data ?? [];
+}
+
+export async function getAlbertoStats(): Promise<AlbertoStats> {
+  const now = new Date();
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  const [todayRes, weekRes, latencyRes, escalationsRes] = await Promise.all([
+    supabase
+      .from("dm_conversations")
+      .select("id", { count: "exact", head: true })
+      .eq("ai_generated", true)
+      .gte("sent_at", todayStart.toISOString()),
+    supabase
+      .from("dm_conversations")
+      .select("id", { count: "exact", head: true })
+      .eq("ai_generated", true)
+      .gte("sent_at", weekAgo.toISOString()),
+    supabase
+      .from("dm_ai_responses")
+      .select("latency_ms")
+      .gte("created_at", weekAgo.toISOString())
+      .not("latency_ms", "is", null),
+    supabase
+      .from("dm_blockers")
+      .select("id", { count: "exact", head: true })
+      .eq("resolved", false)
+      .eq("blocker_type", "escalation"),
+  ]);
+
+  const latencies = (latencyRes.data ?? [])
+    .map((r) => r.latency_ms as number)
+    .filter((n) => n > 0);
+  const avgLatencyMs =
+    latencies.length > 0
+      ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length)
+      : null;
+
+  return {
+    repliesToday: todayRes.count ?? 0,
+    repliesThisWeek: weekRes.count ?? 0,
+    avgLatencyMs,
+    escalationsOpen: escalationsRes.count ?? 0,
+  };
+}
+
+export async function getRecentConversationsWithLeads(
+  limit = 30
+): Promise<ConversationWithLead[]> {
+  const { data, error } = await supabase
+    .from("dm_conversations")
+    .select("*, dm_leads(name, handle, stage)")
+    .order("sent_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as ConversationWithLead[];
 }
