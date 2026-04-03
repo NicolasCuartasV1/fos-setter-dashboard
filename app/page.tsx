@@ -1,5 +1,6 @@
 import {
   getActiveLeads,
+  getHotLeads,
   getRecentSessions,
   getRecentBookings,
   getOpenBlockers,
@@ -127,6 +128,33 @@ function StageBadge({ stage }: { stage: number }) {
   );
 }
 
+function HeatBadge({ heat }: { heat: "hot" | "warm" | "cold" | null }) {
+  if (!heat) return <span style={{ color: "#444", fontSize: 11 }}>--</span>;
+  const cfg = {
+    hot:  { bg: "#E0525222", border: "#E0525244", color: "#E05252", label: "HOT" },
+    warm: { bg: "#E8A83822", border: "#E8A83844", color: "#E8A838", label: "WARM" },
+    cold: { bg: "#4A90D922", border: "#4A90D944", color: "#4A90D9", label: "COLD" },
+  }[heat];
+  return (
+    <span style={{ background: cfg.bg, border: `1px solid ${cfg.border}`, color: cfg.color, borderRadius: 6, padding: "2px 8px", fontSize: 10, fontWeight: 700, letterSpacing: "0.05em" }}>
+      {cfg.label}
+    </span>
+  );
+}
+
+function ScoreBar({ score }: { score: number | null }) {
+  if (score === null) return <span style={{ color: "#444", fontSize: 11 }}>--</span>;
+  const color = score >= 70 ? "#E05252" : score >= 45 ? "#E8A838" : "#4A90D9";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div style={{ width: 48, height: 4, background: "#2A2A2A", borderRadius: 2, overflow: "hidden" }}>
+        <div style={{ width: `${score}%`, height: "100%", background: color, borderRadius: 2 }} />
+      </div>
+      <span style={{ color, fontSize: 11, fontWeight: 600 }}>{score}</span>
+    </div>
+  );
+}
+
 function PipelineFunnel({ counts }: { counts: Record<number, number> }) {
   const stages = [3, 4, 5, 6, 8];
   const maxCount = Math.max(...stages.map((s) => counts[s] ?? 0), 1);
@@ -199,6 +227,7 @@ function formatRevenue(n: number): string {
 
 export default async function Dashboard() {
   let leads: Lead[] = [];
+  let hotLeads: Lead[] = [];
   let sessions: Session[] = [];
   let bookings: Booking[] = [];
   let blockers: Blocker[] = [];
@@ -206,9 +235,10 @@ export default async function Dashboard() {
   let revenue: RevenueData | null = null;
 
   try {
-    [[leads, sessions, bookings, blockers], revenue] = await Promise.all([
+    [[leads, hotLeads, sessions, bookings, blockers], revenue] = await Promise.all([
       Promise.all([
         getActiveLeads(),
+        getHotLeads(),
         getRecentSessions(30),
         getRecentBookings(20),
         getOpenBlockers(),
@@ -296,6 +326,35 @@ export default async function Dashboard() {
         </div>
       </div>
 
+      {/* Hot Leads — Action Now */}
+      {hotLeads.length > 0 && (
+        <div style={{ background: "#1A1A1A", border: "1px solid #E0525233", borderRadius: 12, padding: "1.5rem", marginBottom: "2.5rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 8, height: 8, background: "#E05252", borderRadius: "50%", display: "inline-block", boxShadow: "0 0 6px #E05252" }} />
+              <h3 style={{ color: "#E05252", fontWeight: 700, fontSize: 14, margin: 0 }}>Hot Leads — Act Now</h3>
+            </div>
+            <span style={{ color: "#E05252", fontSize: 12, fontWeight: 600 }}>{hotLeads.length} hot</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {hotLeads.map((lead) => (
+              <div key={lead.id} style={{ background: "#0A0A0A", border: "1px solid #E0525222", borderRadius: 8, padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <span style={{ color: "#F5F5F5", fontSize: 13, fontWeight: 600 }}>{lead.name}</span>
+                  {lead.handle && <span style={{ color: "#666", fontSize: 12, marginLeft: 8 }}>@{lead.handle}</span>}
+                  {lead.bottleneck && <span style={{ color: "#888", fontSize: 12, marginLeft: 12 }}>{lead.bottleneck}</span>}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <StageBadge stage={lead.stage} />
+                  <ScoreBar score={lead.lead_score ?? null} />
+                  <span style={{ color: "#555", fontSize: 11 }}>{lead.last_reply_at ? formatDate(lead.last_reply_at) : lead.last_contact ? formatDate(lead.last_contact) : "—"}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Active Leads */}
       <div style={{ background: "#1A1A1A", border: "1px solid #2A2A2A", borderRadius: 12, padding: "1.5rem", marginBottom: "2.5rem" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -309,7 +368,7 @@ export default async function Dashboard() {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid #2A2A2A" }}>
-                  {["Name", "Handle", "Stage", "Bottleneck", "Last Contact"].map((h) => (
+                  {["Name", "Handle", "Heat", "Score", "Stage", "Bottleneck", "Last Reply"].map((h) => (
                     <th key={h} style={{ padding: "8px 12px", color: "#555", fontSize: 11, textAlign: "left", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 500 }}>{h}</th>
                   ))}
                 </tr>
@@ -319,9 +378,11 @@ export default async function Dashboard() {
                   <tr key={lead.id} style={{ borderBottom: "1px solid #1E1E1E" }}>
                     <td style={{ padding: "10px 12px", color: "#F5F5F5", fontSize: 13 }}>{lead.name}</td>
                     <td style={{ padding: "10px 12px", color: "#888", fontSize: 12 }}>@{lead.handle ?? "—"}</td>
+                    <td style={{ padding: "10px 12px" }}><HeatBadge heat={lead.funnel_heat ?? null} /></td>
+                    <td style={{ padding: "10px 12px" }}><ScoreBar score={lead.lead_score ?? null} /></td>
                     <td style={{ padding: "10px 12px" }}><StageBadge stage={lead.stage} /></td>
                     <td style={{ padding: "10px 12px", color: "#666", fontSize: 12, maxWidth: 200 }}>{lead.bottleneck ?? lead.what_they_said ?? "—"}</td>
-                    <td style={{ padding: "10px 12px", color: "#666", fontSize: 12 }}>{lead.last_contact ? formatDate(lead.last_contact) : "—"}</td>
+                    <td style={{ padding: "10px 12px", color: "#666", fontSize: 12 }}>{lead.last_reply_at ? formatDate(lead.last_reply_at) : lead.last_contact ? formatDate(lead.last_contact) : "—"}</td>
                   </tr>
                 ))}
               </tbody>

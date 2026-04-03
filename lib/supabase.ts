@@ -21,9 +21,33 @@ export type Lead = {
   what_they_said: string | null;
   notes: string | null;
   last_contact: string | null;
+  last_reply_at: string | null;
   assigned_to: string;
   archived: boolean;
   archive_reason: string | null;
+  // scoring + personalization (migration 002)
+  lead_score: number | null;
+  funnel_heat: "hot" | "warm" | "cold" | null;
+  ig_bio: string | null;
+  ig_followers: number | null;
+  niche: string | null;
+  revenue_signal: string | null;
+  objection_type: string | null;
+  conversation_summary: string | null;
+  source_trigger: string | null;
+  ai_opener: string | null;
+};
+
+export type Conversation = {
+  id: number;
+  created_at: string;
+  lead_id: number;
+  manychat_subscriber_id: string | null;
+  direction: "inbound" | "outbound";
+  message_text: string;
+  sent_at: string;
+  ai_generated: boolean;
+  stage_at_send: number | null;
 };
 
 export type Session = {
@@ -86,7 +110,28 @@ export async function getActiveLeads(): Promise<Lead[]> {
     .from("dm_leads")
     .select("*")
     .eq("archived", false)
-    .order("stage", { ascending: false });
+    .order("lead_score", { ascending: false, nullsFirst: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function getHotLeads(): Promise<Lead[]> {
+  const { data, error } = await supabase
+    .from("dm_leads")
+    .select("*")
+    .eq("archived", false)
+    .eq("funnel_heat", "hot")
+    .order("lead_score", { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function getRecentConversations(limit = 20): Promise<Conversation[]> {
+  const { data, error } = await supabase
+    .from("dm_conversations")
+    .select("*")
+    .order("sent_at", { ascending: false })
+    .limit(limit);
   if (error) throw error;
   return data ?? [];
 }
