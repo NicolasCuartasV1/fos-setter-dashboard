@@ -8,6 +8,14 @@
  * Attribution: any booking coming through a link we generated via gen_booking_link.py
  * will have its scheduling_link_uri in dm_scheduling_links — that's how we know
  * it was set by Alberto, not Arber.
+ *
+ * Pre-call message is sent here — AFTER Calendly confirms the booking —
+ * not at the "send_calendly" action in the edge function (that fires too early).
+ *
+ * Required Vercel env vars:
+ *   SUPABASE_SERVICE_ROLE_KEY
+ *   MANYCHAT_TOKEN
+ *   CALENDLY_WEBHOOK_SIGNING_KEY  (optional but recommended)
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -20,6 +28,9 @@ const supabase = createClient(
 );
 
 const WEBHOOK_SIGNING_KEY = process.env.CALENDLY_WEBHOOK_SIGNING_KEY!;
+const MANYCHAT_TOKEN = process.env.MANYCHAT_TOKEN ?? "";
+const MANYCHAT_BASE = "https://api.manychat.com";
+const PRE_CALL_URL = "https://new.founderos.com/pre-call";
 
 function verifySignature(payload: string, signature: string): boolean {
   if (!WEBHOOK_SIGNING_KEY) return true; // skip in dev if key not set
@@ -120,6 +131,36 @@ async function handleInviteeCreated(payload: Record<string, unknown>) {
       .from("dm_leads")
       .update({ stage: 6, stage_label: "Booked", last_contact: new Date().toISOString() })
       .eq("id", leadId);
+  }
+
+  // Send pre-call message via ManyChat — only if we have the subscriber ID
+  // leadHandle is the ManyChat subscriber ID stored by gen_booking_link.py
+  if (leadHandle && MANYCHAT_TOKEN) {
+    try {
+      await fetch(`${MANYCHAT_BASE}/fb/sending/sendContent`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${MANYCHAT_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          subscriber_id: leadHandle,
+          data: {
+            version: "v2",
+            content: {
+              messages: [{
+                type: "text",
+                text: `just saw the confirmation come in — watch the first 2 videos before your call: ${PRE_CALL_URL} — it'll make the hour 10x more valuable`,
+              }],
+            },
+          },
+          message_tag: "NON_PROMOTIONAL_SUBSCRIPTION",
+        }),
+      });
+      console.log(`[Calendly] Pre-call message sent to ${leadHandle}`);
+    } catch (err) {
+      console.error("[Calendly] Failed to send pre-call message:", err);
+    }
   }
 
   console.log(`[Calendly] Booking confirmed: ${leadName} — ${eventStart}`);
