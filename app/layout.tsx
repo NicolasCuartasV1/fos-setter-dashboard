@@ -4,6 +4,9 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "DM Setter Dashboard — Matt Gray Instagram",
   description: "Live pipeline, KPIs, and session logs for Matt Gray / Founder OS Instagram DM setting",
+  icons: {
+    icon: "/favicon.png",
+  },
 };
 
 export default function RootLayout({
