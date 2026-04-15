@@ -247,20 +247,23 @@ function KPICard({
   value,
   sub,
   highlight,
+  tooltip,
 }: {
   label: string;
   value: string | number;
   sub?: string;
   highlight?: boolean;
+  tooltip?: string;
 }) {
   return (
     <div
-      className={`bg-card rounded-xl p-5 transition-colors ${
+      className={`bg-card rounded-xl p-5 transition-colors group relative ${
         highlight ? "border border-lime/30" : "border border-border"
       }`}
     >
       <p className="text-muted text-[11px] uppercase tracking-wider mb-2">
         {label}
+        {tooltip && <span className="ml-1 text-muted/50 cursor-help" title={tooltip}>?</span>}
       </p>
       <p
         className={`text-2xl font-bold leading-none ${
@@ -270,6 +273,11 @@ function KPICard({
         {value}
       </p>
       {sub && <p className="text-muted text-[11px] mt-1.5">{sub}</p>}
+      {tooltip && (
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-[#111] border border-border rounded-lg text-[10px] text-muted leading-relaxed max-w-[220px] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 whitespace-normal">
+          {tooltip}
+        </div>
+      )}
     </div>
   );
 }
@@ -1604,21 +1612,24 @@ export default function Dashboard() {
             label="Conversations Today"
             value={todayPulse.messagesIn + todayPulse.messagesOut}
             sub={`${todayPulse.messagesIn} in / ${todayPulse.messagesOut} out`}
+            tooltip="Total DMs sent and received today across all platforms. Inbound = leads messaging us. Outbound = Alberto's replies."
           />
           <KPICard
             label="Reply Rate"
-            value={
-              filteredLeads.length > 0
-                ? `${((filteredLeads.filter((l) => l.stage >= 3).length / filteredLeads.length) * 100).toFixed(1)}%`
-                : "0%"
-            }
-            sub={`${filteredLeads.filter((l) => l.stage >= 3).length} of ${filteredLeads.length} leads`}
+            value={(() => {
+              const leadsWithReplies = filteredLeads.filter((l) => l.last_reply_at !== null).length;
+              const leadsContacted = filteredLeads.filter((l) => l.stage >= 2).length;
+              return leadsContacted > 0 ? `${((leadsWithReplies / leadsContacted) * 100).toFixed(1)}%` : "0%";
+            })()}
+            sub={`${filteredLeads.filter((l) => l.last_reply_at !== null).length} replied of ${filteredLeads.filter((l) => l.stage >= 2).length} contacted`}
+            tooltip="Percentage of leads who replied after Alberto contacted them. Only counts leads at stage 2+ (opener sent or beyond)."
           />
           <KPICard
             label="Calls Booked (Week)"
             value={weekly.booked}
             highlight={weekly.booked > 0}
             sub={`${weekly.sets} links sent`}
+            tooltip="Brand Strategy Calls booked this week through Alberto's DM conversations. Links sent = Calendly links delivered."
           />
           <KPICard
             label="Show Rate"
@@ -1630,29 +1641,25 @@ export default function Dashboard() {
               return eligible > 0 ? `${((completed / eligible) * 100).toFixed(1)}%` : "0%";
             })()}
             sub={`${bookings.filter((b) => b.status === "completed").length} completed`}
+            tooltip="Percentage of booked calls that actually happened. Excludes cancelled. Low show rate = qualification issue."
           />
           <KPICard
-            label="Revenue"
-            value={
-              revenue
-                ? formatRevenue(
-                    revenue.os_light.revenue_all_time +
-                      revenue.sales_pipeline.closed_won_revenue
-                  )
-                : "$0"
-            }
-            highlight={
-              revenue !== null &&
-              revenue.os_light.revenue_all_time +
-                revenue.sales_pipeline.closed_won_revenue >
-                0
-            }
-            sub={
-              revenue
-                ? `${revenue.os_light.total_this_week} OS Light this week`
-                : undefined
-            }
+            label="Alberto Revenue"
+            value={(() => {
+              const albertoBookings = bookings.filter((b) => b.set_by === "alberto" && b.outcome);
+              const cashCollected = albertoBookings.reduce((sum, b) => {
+                const val = typeof b.outcome === "string" && b.outcome.includes("$")
+                  ? parseFloat(b.outcome.replace(/[^0-9.]/g, "")) || 0
+                  : 0;
+                return sum + val;
+              }, 0);
+              return cashCollected > 0 ? formatRevenue(cashCollected) : "$0";
+            })()}
+            highlight={bookings.some((b) => b.set_by === "alberto" && b.status === "completed")}
+            sub={`${bookings.filter((b) => b.set_by === "alberto" && b.status === "completed").length} closed by Alberto`}
+            tooltip="Cash collected from deals where Alberto set the call. Only counts revenue directly attributed to Alberto's DM conversations, not total pipeline."
           />
+          {/* Revenue API still fetched for analytics tab but KPI shows Alberto-attributed only */}
         </div>
 
         {/* Platform Overview */}
