@@ -23,11 +23,11 @@ Next.js 16 App Router, TypeScript, Supabase (xzmntpwwccmpkgeprodj), Vercel
 - app/api/webhooks/calendly/route.ts — Calendly booking webhooks
 
 ## Supabase Project
-xzmntpwwccmpkgeprodj (fos-setter project)
+fos-setter project. Project ID in Supabase Vault (do not hardcode in docs).
 Tables: dm_leads, dm_conversations, dm_ai_responses, dm_sessions, dm_bookings, dm_blockers, dm_resources
 
 ## Environment Variables (Vercel)
-NEXT_PUBLIC_SUPABASE_URL
+NEXT_PUBLIC_SUPABASE_URL (Vercel env - do not commit)
 NEXT_PUBLIC_SUPABASE_ANON_KEY
 HUBSPOT_API_KEY (revenue API route)
 NEXT_PUBLIC_SITE_URL
