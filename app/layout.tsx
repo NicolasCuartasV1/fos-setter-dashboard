@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Alberto War Room - FOS DM Setter Dashboard",
+  title: "Alberto War Room",
   description:
-    "Live pipeline, KPIs, and session logs for Matt Gray / Founder OS Instagram DM setting",
+    "Brand DM operations command center",
   icons: {
     icon: "/favicon.png",
   },

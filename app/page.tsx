@@ -2,6 +2,13 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import ChatWidget from "./dashboard/ChatWidget";
+import { BaseChart } from "./dashboard/charts/BaseChart";
+import {
+  buildWeeklyBookingsOption,
+  buildPlatformBreakdownOption,
+  buildFunnelOption,
+  buildDailyActivityOption,
+} from "@/lib/dm-chart-utils";
 import type {
   Lead,
   Session,
@@ -80,6 +87,7 @@ type TabId = "pipeline" | "conversations" | "analytics" | "settings";
 type SortKey =
   | "name"
   | "handle"
+  | "platform"
   | "funnel_heat"
   | "lead_score"
   | "stage"
@@ -122,9 +130,16 @@ const HEAT_COLORS = {
   cold: "bg-blue-500/20 text-blue-300 border-blue-500/40",
 } as const;
 
+const PLATFORM_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+  instagram: { bg: "bg-pink-500/20", text: "text-pink-300", border: "border-pink-500/40" },
+  linkedin: { bg: "bg-blue-500/20", text: "text-blue-300", border: "border-blue-500/40" },
+  x: { bg: "bg-white/10", text: "text-white", border: "border-white/20" },
+};
+
 const COLUMN_DEFS = [
   { id: "name", label: "Name", sortKey: "name" as SortKey },
   { id: "handle", label: "Handle", sortKey: "handle" as SortKey },
+  { id: "platform", label: "Platform", sortKey: "platform" as SortKey },
   { id: "funnel_heat", label: "Heat", sortKey: "funnel_heat" as SortKey },
   { id: "lead_score", label: "Score", sortKey: "lead_score" as SortKey },
   { id: "stage", label: "Stage", sortKey: "stage" as SortKey },
@@ -165,13 +180,6 @@ function formatRevenue(n: number): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
   return `$${n.toLocaleString()}`;
-}
-
-function formatHour(hour: number): string {
-  if (hour === 0) return "12a";
-  if (hour < 12) return `${hour}a`;
-  if (hour === 12) return "12p";
-  return `${hour - 12}p`;
 }
 
 function secondsAgo(isoTimestamp: string): number {
@@ -317,6 +325,19 @@ function ScoreBar({ score }: { score: number | null }) {
   );
 }
 
+function PlatformBadge({ platform }: { platform: string }) {
+  const p = (platform ?? "instagram").toLowerCase();
+  const colors = PLATFORM_COLORS[p] ?? PLATFORM_COLORS.instagram;
+  const label = p === "x" ? "X" : p.charAt(0).toUpperCase() + p.slice(1);
+  return (
+    <span
+      className={`${colors.bg} ${colors.text} ${colors.border} text-[10px] font-medium px-2.5 py-1 rounded-full border whitespace-nowrap`}
+    >
+      {label}
+    </span>
+  );
+}
+
 // ── Column Toggle (matching VideoTable pattern) ─────────────────────────────
 
 function ColumnToggle({
@@ -433,6 +454,10 @@ function PipelineTab({
         case "handle":
           aVal = (a.handle ?? "").toLowerCase();
           bVal = (b.handle ?? "").toLowerCase();
+          break;
+        case "platform":
+          aVal = (a.platform ?? "instagram").toLowerCase();
+          bVal = (b.platform ?? "instagram").toLowerCase();
           break;
         case "funnel_heat": {
           const order = { hot: 3, warm: 2, cold: 1 };
@@ -575,6 +600,12 @@ function PipelineTab({
                             className="px-4 py-3 text-muted text-sm"
                           >
                             @{lead.handle ?? "--"}
+                          </td>
+                        );
+                      case "platform":
+                        return (
+                          <td key={col.id} className="px-4 py-3">
+                            <PlatformBadge platform={lead.platform} />
                           </td>
                         );
                       case "funnel_heat":
@@ -775,7 +806,7 @@ function ConversationsTab({
         <div className="bg-card border border-amber-500/30 rounded-xl p-5">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-semibold text-white">
-              What Alberto Needs from Nicolas
+              Escalations Requiring Attention
             </h3>
             <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-full px-3 py-0.5 text-xs font-semibold">
               {blockers.length} open
@@ -908,30 +939,27 @@ function ConversationsTab({
 
 function AnalyticsTab({
   todayPulse,
-  hourlyLatency,
   sessions,
   bookings,
+  leads,
+  conversations,
   revenue,
 }: {
   todayPulse: TodayPulse;
-  hourlyLatency: HourlyLatency[];
   sessions: Session[];
   bookings: Booking[];
+  leads: Lead[];
+  conversations: ConversationWithLead[];
   revenue: RevenueData | null;
 }) {
-  const currentHour = new Date().getHours();
-  const ordered: HourlyLatency[] = [];
-  for (let i = 1; i <= 24; i++) {
-    const h = (currentHour + i) % 24;
-    const entry = hourlyLatency.find((d) => d.hour === h);
-    ordered.push(entry ?? { hour: h, avgMs: 0, count: 0 });
-  }
-  const maxMs = Math.max(...ordered.map((d) => d.avgMs), 1);
-  const chartHeight = 120;
-
   const confirmedBookings = bookings.filter(
     (b) => b.status === "booked" || b.status === "completed"
   );
+
+  const weeklyBookingsOption = useMemo(() => buildWeeklyBookingsOption(sessions), [sessions]);
+  const platformBreakdownOption = useMemo(() => buildPlatformBreakdownOption(leads), [leads]);
+  const funnelOption = useMemo(() => buildFunnelOption(leads), [leads]);
+  const dailyActivityOption = useMemo(() => buildDailyActivityOption(conversations), [conversations]);
 
   return (
     <div className="space-y-6">
@@ -1005,63 +1033,40 @@ function AnalyticsTab({
         </div>
       </div>
 
-      {/* Response Time Chart */}
-      <div className="bg-card border border-border rounded-xl p-5">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-sm font-semibold text-white">
-            AI Response Time (24h)
-          </h3>
-          <span className="text-muted text-[11px]">avg latency per hour</span>
-        </div>
-        <div
-          className="flex items-end gap-0.5 relative"
-          style={{ height: chartHeight, paddingBottom: 20 }}
-        >
-          {ordered.map((entry, i) => {
-            const barH =
-              entry.avgMs > 0
-                ? Math.max(
-                    (entry.avgMs / maxMs) * (chartHeight - 20),
-                    4
-                  )
-                : 0;
-            const isNow = entry.hour === currentHour;
-            const barColor = isNow
-              ? "bg-lime"
-              : entry.avgMs > 3000
-                ? "bg-red-400"
-                : entry.avgMs > 1500
-                  ? "bg-amber-400"
-                  : "bg-blue-400";
-            return (
-              <div
-                key={i}
-                className="flex-1 flex flex-col items-center justify-end relative"
-                title={`${formatHour(entry.hour)}: ${entry.avgMs > 0 ? formatLatency(entry.avgMs) : "no data"} (${entry.count} calls)`}
-              >
-                {barH > 0 && (
-                  <div
-                    className={`w-full max-w-[14px] ${barColor} rounded-t-sm transition-all duration-500 ${isNow ? "opacity-100" : "opacity-70"}`}
-                    style={{ height: barH }}
-                  />
-                )}
-                {i % 4 === 0 && (
-                  <span
-                    className={`absolute -bottom-[18px] text-[9px] whitespace-nowrap ${isNow ? "text-lime" : "text-muted"}`}
-                  >
-                    {formatHour(entry.hour)}
-                  </span>
-                )}
-              </div>
-            );
-          })}
-        </div>
-        <div className="flex justify-between mt-2 pt-2 border-t border-[#1E1E1E]">
-          <span className="text-muted text-[10px]">0ms</span>
-          <span className="text-muted text-[10px]">
-            {formatLatency(maxMs)}
-          </span>
-        </div>
+      {/* ECharts: 2x2 grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <BaseChart
+          title="Weekly Bookings"
+          subtitle="Last 8 weeks"
+          option={weeklyBookingsOption}
+          height={280}
+          empty={sessions.length === 0}
+          emptyMessage="No session data yet."
+        />
+        <BaseChart
+          title="Platform Breakdown"
+          subtitle="Leads by platform and stage"
+          option={platformBreakdownOption}
+          height={280}
+          empty={leads.length === 0}
+          emptyMessage="No leads yet."
+        />
+        <BaseChart
+          title="Conversion Funnel"
+          subtitle="Pipeline progression"
+          option={funnelOption}
+          height={280}
+          empty={leads.length === 0}
+          emptyMessage="No leads yet."
+        />
+        <BaseChart
+          title="Daily Activity"
+          subtitle="Inbound / Outbound over 30 days"
+          option={dailyActivityOption}
+          height={280}
+          empty={conversations.length === 0}
+          emptyMessage="No conversation data yet."
+        />
       </div>
 
       {/* Bookings Table */}
@@ -1325,12 +1330,6 @@ function SettingsTab() {
           </div>
           <div>
             <p className="text-muted text-xs uppercase tracking-wider mb-1">
-              Operator
-            </p>
-            <p className="text-white text-sm">Nicolas</p>
-          </div>
-          <div>
-            <p className="text-muted text-xs uppercase tracking-wider mb-1">
               Bot Identity
             </p>
             <p className="text-white text-sm">
@@ -1342,7 +1341,7 @@ function SettingsTab() {
               Platform
             </p>
             <p className="text-white text-sm">
-              Instagram DMs via ManyChat
+              Instagram, LinkedIn, X
             </p>
           </div>
         </div>
@@ -1461,12 +1460,6 @@ export default function Dashboard() {
   const sessions = data?.sessions ?? [];
   const bookings = data?.bookings ?? [];
   const blockers = data?.blockers ?? [];
-  const albertoStats = data?.albertoStats ?? {
-    repliesToday: 0,
-    repliesThisWeek: 0,
-    avgLatencyMs: null,
-    escalationsOpen: 0,
-  };
   const recentConversations = data?.recentConversations ?? [];
   const todayPulse = data?.todayPulse ?? {
     messagesIn: 0,
@@ -1491,8 +1484,6 @@ export default function Dashboard() {
     calendlyToBooked: null,
     dmsToBooked: null,
   };
-  const hourlyLatency = data?.hourlyLatency ?? [];
-
   const weekly = weeklyStats(sessions);
 
   // Date filtering for leads
@@ -1505,12 +1496,6 @@ export default function Dashboard() {
       return d >= from && d <= to;
     });
   }, [leads, dateFrom, dateTo]);
-
-  const latencyLabel = albertoStats.avgLatencyMs
-    ? albertoStats.avgLatencyMs >= 1000
-      ? `${(albertoStats.avgLatencyMs / 1000).toFixed(1)}s`
-      : `${albertoStats.avgLatencyMs}ms`
-    : "--";
 
   const tabs: { id: TabId; label: string }[] = [
     { id: "pipeline", label: "Pipeline" },
@@ -1526,9 +1511,24 @@ export default function Dashboard() {
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <span className="w-2 h-2 bg-lime rounded-full" />
+              <div className="relative w-2.5 h-2.5">
+                <div className="absolute inset-0 rounded-full bg-lime/30 animate-ping" />
+                <div
+                  className="w-2.5 h-2.5 rounded-full bg-lime relative"
+                  style={{ animation: "pulse-dot 2s ease-in-out infinite" }}
+                />
+              </div>
               <span className="text-muted text-[11px] uppercase tracking-widest">
-                Founder OS / Instagram DMs
+                Founder OS / Brand DMs
+              </span>
+              <span className="bg-pink-500/20 text-pink-300 border border-pink-500/40 text-[9px] font-bold px-1.5 py-0.5 rounded">
+                IG
+              </span>
+              <span className="bg-blue-500/20 text-blue-300 border border-blue-500/40 text-[9px] font-bold px-1.5 py-0.5 rounded">
+                LinkedIn
+              </span>
+              <span className="bg-white/10 text-white border border-white/20 text-[9px] font-bold px-1.5 py-0.5 rounded">
+                X
               </span>
             </div>
             <h1 className="text-xl font-semibold text-white">
@@ -1601,37 +1601,45 @@ export default function Dashboard() {
         {/* 5 KPI Summary Cards */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <KPICard
-            label="Active Leads"
-            value={filteredLeads.length}
-            sub={`${hotLeads.length} hot`}
-          />
-          <KPICard
-            label="DMs Today"
-            value={
-              todayPulse.messagesIn + todayPulse.messagesOut
-            }
+            label="Conversations Today"
+            value={todayPulse.messagesIn + todayPulse.messagesOut}
             sub={`${todayPulse.messagesIn} in / ${todayPulse.messagesOut} out`}
           />
           <KPICard
-            label="Calls Booked (week)"
+            label="Reply Rate"
+            value={
+              filteredLeads.length > 0
+                ? `${((filteredLeads.filter((l) => l.stage >= 3).length / filteredLeads.length) * 100).toFixed(1)}%`
+                : "0%"
+            }
+            sub={`${filteredLeads.filter((l) => l.stage >= 3).length} of ${filteredLeads.length} leads`}
+          />
+          <KPICard
+            label="Calls Booked (Week)"
             value={weekly.booked}
             highlight={weekly.booked > 0}
             sub={`${weekly.sets} links sent`}
           />
           <KPICard
-            label="Avg Response Time"
-            value={latencyLabel}
-            sub="Claude API latency"
+            label="Show Rate"
+            value={(() => {
+              const completed = bookings.filter((b) => b.status === "completed").length;
+              const eligible = bookings.filter(
+                (b) => b.status === "completed" || b.status === "booked" || b.status === "no_show"
+              ).length;
+              return eligible > 0 ? `${((completed / eligible) * 100).toFixed(1)}%` : "0%";
+            })()}
+            sub={`${bookings.filter((b) => b.status === "completed").length} completed`}
           />
           <KPICard
-            label="Revenue Pipeline"
+            label="Revenue"
             value={
               revenue
                 ? formatRevenue(
                     revenue.os_light.revenue_all_time +
                       revenue.sales_pipeline.closed_won_revenue
                   )
-                : "--"
+                : "$0"
             }
             highlight={
               revenue !== null &&
@@ -1645,6 +1653,65 @@ export default function Dashboard() {
                 : undefined
             }
           />
+        </div>
+
+        {/* Platform Overview */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {[
+            { key: "instagram", label: "Instagram", color: "#E4405F", bgClass: "border-pink-500/30" },
+            { key: "linkedin", label: "LinkedIn", color: "#0A66C2", bgClass: "border-blue-500/30" },
+            { key: "x", label: "X", color: "#FFFFFF", bgClass: "border-white/20" },
+          ].map((platform) => {
+            const platformLeads = filteredLeads.filter(
+              (l) => (l.platform ?? "instagram").toLowerCase() === platform.key
+            );
+            const hotCount = platformLeads.filter((l) => l.funnel_heat === "hot").length;
+            const bookedCount = platformLeads.filter(
+              (l) => l.stage >= 6 && l.stage !== 10
+            ).length;
+            return (
+              <div
+                key={platform.key}
+                className={`bg-card border ${platform.bgClass} rounded-xl p-5`}
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  <div
+                    className="w-2 h-2 rounded-full"
+                    style={{ backgroundColor: platform.color }}
+                  />
+                  <span className="text-white text-sm font-semibold">
+                    {platform.label}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <p className="text-white text-xl font-bold leading-none">
+                      {platformLeads.length}
+                    </p>
+                    <p className="text-muted text-[10px] uppercase tracking-wider mt-1">
+                      Active
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-amber-400 text-xl font-bold leading-none">
+                      {hotCount}
+                    </p>
+                    <p className="text-muted text-[10px] uppercase tracking-wider mt-1">
+                      Hot
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-lime text-xl font-bold leading-none">
+                      {bookedCount}
+                    </p>
+                    <p className="text-muted text-[10px] uppercase tracking-wider mt-1">
+                      Booked
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         {/* Active Tab */}
@@ -1664,9 +1731,10 @@ export default function Dashboard() {
         {activeTab === "analytics" && (
           <AnalyticsTab
             todayPulse={todayPulse}
-            hourlyLatency={hourlyLatency}
             sessions={sessions}
             bookings={bookings}
+            leads={filteredLeads}
+            conversations={recentConversations}
             revenue={revenue}
           />
         )}
@@ -1674,7 +1742,7 @@ export default function Dashboard() {
 
         {/* Footer */}
         <p className="text-[#333] text-[11px] text-center pt-8">
-          Alberto v1 / FOS DM Setter / Matt Gray Instagram
+          Alberto v1 / FOS Brand DM Command Center
         </p>
       </div>
 

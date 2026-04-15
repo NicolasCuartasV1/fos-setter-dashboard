@@ -15,12 +15,12 @@ interface DashboardContext {
 }
 
 const PROMPTS = [
-  "Which leads should I follow up?",
-  "What is our conversion rate?",
-  "Show me hot leads",
-  "What is Alberto doing today?",
-  "Which stage has the most leads stuck?",
-  "Show pipeline health summary",
+  "What's our funnel conversion this week?",
+  "Which platform generates the most bookings?",
+  "Show me leads that need follow-up",
+  "Where are we losing in the pipeline?",
+  "What's our reply rate trend?",
+  "Which leads are closest to booking?",
 ];
 
 export default function ChatWidget({
@@ -42,6 +42,19 @@ export default function ChatWidget({
   useEffect(() => {
     if (open) inputRef.current?.focus();
   }, [open]);
+
+  // Auto-open on first visit
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const seen = localStorage.getItem("dm-chat-seen");
+    if (!seen) {
+      const timer = setTimeout(() => {
+        setOpen(true);
+        localStorage.setItem("dm-chat-seen", "1");
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, []);
 
   const startResize = useCallback(
     (e: React.MouseEvent) => {
@@ -111,11 +124,15 @@ export default function ChatWidget({
 
   return (
     <>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-lime rounded-full flex items-center justify-center shadow-2xl hover:scale-105 transition-transform cursor-pointer"
-        title="Alberto AI Assistant"
-      >
+      <div className="fixed bottom-6 right-6 z-50">
+        {!open && (
+          <div className="absolute inset-0 rounded-full bg-lime/30 animate-ping" />
+        )}
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="relative w-14 h-14 bg-lime rounded-full flex items-center justify-center shadow-2xl hover:scale-105 transition-transform cursor-pointer"
+          title="Alberto Intelligence"
+        >
         {open ? (
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -146,7 +163,8 @@ export default function ChatWidget({
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
         )}
-      </button>
+        </button>
+      </div>
 
       {open && (
         <div
@@ -198,7 +216,7 @@ export default function ChatWidget({
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-[13px] font-semibold text-white tracking-tight leading-none">
-                Alberto AI Assistant
+                Alberto Intelligence
               </p>
               <p className="text-[11px] text-[#555] mt-1 leading-none">
                 Live pipeline data

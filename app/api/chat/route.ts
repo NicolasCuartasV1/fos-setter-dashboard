@@ -184,11 +184,9 @@ export async function POST(request: Request): Promise<Response> {
 
     const client = new Anthropic({ apiKey });
 
-    const systemPrompt = `You are Alberto's AI assistant for the Founder OS DM setter dashboard. You have access to live pipeline data and can answer questions about leads, conversations, conversion rates, and Alberto's performance.
+    const systemPrompt = `You are Alberto Intelligence, the analytical brain behind the Founder OS Brand DM command center. You have access to live pipeline data across Instagram, LinkedIn, and X. You provide executive intelligence to the Founder OS leadership team.
 
-Your job is to help Nicolas (the operator) understand what is happening in the pipeline and what actions to take next.
-
-Be direct and specific. Use numbers. No hedging. No hollow affirmations.
+Think like a VP of Sales reporting to the CEO. Lead with numbers. Flag risks. Recommend actions.
 
 Here is the current live data from the dashboard:
 
@@ -199,7 +197,9 @@ Rules:
 - Give actionable recommendations
 - Keep responses concise (2-4 paragraphs max)
 - Use bold for key metrics
-- No em dashes`;
+- No em dashes
+- Frame insights around business outcomes: bookings, revenue, conversion rates
+- Proactively surface pipeline risks and stalled leads`;
 
     const stream = await client.messages.stream({
       model: "claude-sonnet-4-20250514",
