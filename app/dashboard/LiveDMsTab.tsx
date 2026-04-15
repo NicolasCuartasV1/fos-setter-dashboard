@@ -161,7 +161,12 @@ export default function LiveDMsTab({ leads }: { leads: Lead[] }) {
   const [newInbound, setNewInbound] = useState<Set<number>>(new Set());
   const [search, setSearch] = useState("");
   const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const [overrideText, setOverrideText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendStatus, setSendStatus] = useState<"idle" | "sent" | "error">("idle");
+  const [sendError, setSendError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const selectedLead = leads.find((l) => l.id === selectedLeadId) ?? null;
 
@@ -269,6 +274,59 @@ export default function LiveDMsTab({ leads }: { leads: Lead[] }) {
     ? `https://app.manychat.com/fb1072081/chat/${selectedLead.manychat_id}`
     : "https://app.manychat.com/fb1072081/chat";
 
+  const canOverride = !!(selectedLead?.manychat_id);
+
+  async function sendOverride() {
+    if (!selectedLead || !overrideText.trim() || !canOverride || sending) return;
+    setSending(true);
+    setSendStatus("idle");
+    setSendError("");
+
+    // Optimistic append
+    const optimistic: Conversation = {
+      id: Date.now(),
+      created_at: new Date().toISOString(),
+      lead_id: selectedLead.id,
+      manychat_subscriber_id: selectedLead.manychat_id,
+      direction: "outbound",
+      message_text: overrideText.trim(),
+      sent_at: new Date().toISOString(),
+      ai_generated: false,
+      stage_at_send: selectedLead.stage,
+    };
+    setMessages((prev) => [...prev, optimistic]);
+    const sentText = overrideText.trim();
+    setOverrideText("");
+
+    try {
+      const res = await fetch("/api/manychat-send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subscriber_id: selectedLead.manychat_id,
+          message_text: sentText,
+          lead_id: selectedLead.id,
+        }),
+      });
+      const data = await res.json() as { ok: boolean; error?: string };
+      if (!data.ok) {
+        setSendStatus("error");
+        setSendError(data.error ?? "Send failed");
+        // Roll back optimistic message
+        setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+      } else {
+        setSendStatus("sent");
+        setTimeout(() => setSendStatus("idle"), 2500);
+      }
+    } catch {
+      setSendStatus("error");
+      setSendError("Network error. Try again.");
+      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+    } finally {
+      setSending(false);
+    }
+  }
+
   return (
     <div className="flex gap-4 h-[680px]">
       {/* ── Left: Thread List ───────────────────────────────────────────── */}
@@ -346,19 +404,13 @@ export default function LiveDMsTab({ leads }: { leads: Lead[] }) {
                 </div>
               </div>
 
-              {/* Actions */}
-              <div className="flex items-center gap-2">
-                <a
-                  href={manychatUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-lime/10 border border-lime/30 text-lime hover:bg-lime/20 transition-colors"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                  </svg>
-                  Reply in ManyChat
-                </a>
+              {/* Stage indicator */}
+              <div className="flex items-center gap-1.5">
+                {canOverride ? (
+                  <span className="text-[10px] text-lime/70 font-medium">Override ready</span>
+                ) : (
+                  <span className="text-[10px] text-muted">No ManyChat ID</span>
+                )}
               </div>
             </div>
 
@@ -381,24 +433,76 @@ export default function LiveDMsTab({ leads }: { leads: Lead[] }) {
               <div ref={bottomRef} />
             </div>
 
-            {/* Bottom bar */}
-            <div className="px-5 py-3 border-t border-border flex-shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="flex-1 bg-background border border-border rounded-xl px-4 py-2.5 text-xs text-muted">
-                  Replies sent via Alberto (ManyChat webhook). Click &ldquo;Reply in ManyChat&rdquo; to send manually.
+            {/* Override Panel */}
+            <div className="px-4 py-3 border-t border-border flex-shrink-0">
+              {!canOverride ? (
+                <div className="flex items-center gap-2 px-3 py-2 bg-background border border-border rounded-xl">
+                  <span className="text-muted text-xs">No ManyChat ID linked for this lead.</span>
+                  <a href={manychatUrl} target="_blank" rel="noopener noreferrer"
+                    className="text-xs text-lime hover:underline ml-auto">Open ManyChat</a>
                 </div>
-                <a
-                  href={manychatUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex-shrink-0 w-9 h-9 bg-lime rounded-xl flex items-center justify-center hover:opacity-90 transition-opacity"
-                  title="Open in ManyChat"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0A0A0A" strokeWidth="2.5">
-                    <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/>
-                  </svg>
-                </a>
-              </div>
+              ) : (
+                <div className={`flex items-end gap-2 bg-background border rounded-xl px-3 py-2 transition-colors focus-within:border-lime ${
+                  sendStatus === "error" ? "border-red-500/50" : "border-border"
+                }`}>
+                  <textarea
+                    ref={textareaRef}
+                    value={overrideText}
+                    onChange={(e) => setOverrideText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        sendOverride();
+                      }
+                    }}
+                    onInput={(e) => {
+                      const t = e.currentTarget;
+                      t.style.height = "auto";
+                      t.style.height = Math.min(t.scrollHeight, 80) + "px";
+                    }}
+                    placeholder={
+                      sendStatus === "sent"
+                        ? "Sent."
+                        : "Manual override — type to send as Matt..."
+                    }
+                    rows={1}
+                    disabled={sending}
+                    className="flex-1 bg-transparent text-white text-xs placeholder-muted resize-none outline-none leading-relaxed"
+                    style={{ minHeight: "20px", maxHeight: "80px" }}
+                  />
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <a href={manychatUrl} target="_blank" rel="noopener noreferrer"
+                      className="text-muted hover:text-lime transition-colors" title="Open in ManyChat">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                        <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+                      </svg>
+                    </a>
+                    <button
+                      onClick={sendOverride}
+                      disabled={sending || !overrideText.trim()}
+                      className="w-7 h-7 bg-lime rounded-lg flex items-center justify-center hover:opacity-90 disabled:opacity-20 transition-opacity cursor-pointer flex-shrink-0"
+                    >
+                      {sending ? (
+                        <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#0A0A0A" strokeWidth="2.5">
+                          <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                        </svg>
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#0A0A0A" strokeWidth="2.5">
+                          <line x1="22" y1="2" x2="11" y2="13"/>
+                          <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {sendStatus === "error" && (
+                <p className="text-red-400 text-[10px] mt-1 px-1">{sendError}</p>
+              )}
+              <p className="text-[10px] text-muted mt-1 px-1">
+                Enter to send &bull; Shift+Enter new line &bull; sends as Matt via ManyChat
+              </p>
             </div>
           </>
         )}
