@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import ChatWidget from "./dashboard/ChatWidget";
+import LiveDMsTab from "./dashboard/LiveDMsTab";
+import InboxTab from "./dashboard/InboxTab";
 import { BaseChart } from "./dashboard/charts/BaseChart";
 import {
   buildWeeklyBookingsOption,
@@ -83,7 +85,7 @@ type DashboardData = {
   timestamp: string;
 };
 
-type TabId = "pipeline" | "conversations" | "analytics" | "settings";
+type TabId = "pipeline" | "conversations" | "live-dms" | "inbox" | "analytics" | "settings";
 type SortKey =
   | "name"
   | "handle"
@@ -1505,9 +1507,11 @@ export default function Dashboard() {
     });
   }, [leads, dateFrom, dateTo]);
 
-  const tabs: { id: TabId; label: string }[] = [
+  const tabs: { id: TabId; label: string; live?: boolean }[] = [
     { id: "pipeline", label: "Pipeline" },
     { id: "conversations", label: "Conversations" },
+    { id: "live-dms", label: "Live DMs", live: true },
+    { id: "inbox", label: "Inbox", live: true },
     { id: "analytics", label: "Analytics" },
     { id: "settings", label: "Settings" },
   ];
@@ -1554,12 +1558,20 @@ export default function Dashboard() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
                   activeTab === tab.id
                     ? "bg-lime text-black"
                     : "text-muted hover:text-white"
                 }`}
               >
+                {tab.live && (
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                      activeTab === tab.id ? "bg-black" : "bg-lime"
+                    }`}
+                    style={activeTab !== tab.id ? { boxShadow: "0 0 4px #D9FC67" } : undefined}
+                  />
+                )}
                 {tab.label}
               </button>
             ))}
@@ -1734,6 +1746,12 @@ export default function Dashboard() {
             conversations={recentConversations}
             blockers={blockers}
           />
+        )}
+        {activeTab === "live-dms" && (
+          <LiveDMsTab leads={leads} />
+        )}
+        {activeTab === "inbox" && (
+          <InboxTab leads={leads} />
         )}
         {activeTab === "analytics" && (
           <AnalyticsTab
