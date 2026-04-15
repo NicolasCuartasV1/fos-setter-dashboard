@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import ChatWidget from "./dashboard/ChatWidget";
 import LiveDMsTab from "./dashboard/LiveDMsTab";
+import InboxTab from "./dashboard/InboxTab";
 import { BaseChart } from "./dashboard/charts/BaseChart";
 import {
   buildWeeklyBookingsOption,
@@ -84,7 +85,7 @@ type DashboardData = {
   timestamp: string;
 };
 
-type TabId = "pipeline" | "conversations" | "live-dms" | "analytics" | "settings";
+type TabId = "pipeline" | "conversations" | "live-dms" | "inbox" | "analytics" | "settings";
 type SortKey =
   | "name"
   | "handle"
@@ -1510,6 +1511,7 @@ export default function Dashboard() {
     { id: "pipeline", label: "Pipeline" },
     { id: "conversations", label: "Conversations" },
     { id: "live-dms", label: "Live DMs", live: true },
+    { id: "inbox", label: "Inbox", live: true },
     { id: "analytics", label: "Analytics" },
     { id: "settings", label: "Settings" },
   ];
@@ -1747,6 +1749,9 @@ export default function Dashboard() {
         )}
         {activeTab === "live-dms" && (
           <LiveDMsTab leads={leads} />
+        )}
+        {activeTab === "inbox" && (
+          <InboxTab leads={leads} />
         )}
         {activeTab === "analytics" && (
           <AnalyticsTab
